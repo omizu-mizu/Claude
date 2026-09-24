@@ -7,7 +7,7 @@ name = "ytmp3"
 version = "0.1.0"
 description = "yt-dlp を使って YouTube の音声を MP3 で保存する CLI / Web アプリ"
 requires-python = ">=3.9"
-dependencies = ["yt-dlp", "flask>=2.2"]
+dependencies = ["yt-dlp[default]", "flask>=2.2"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
