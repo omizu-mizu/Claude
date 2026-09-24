@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ytmp3"
+version = "0.1.0"
+description = "yt-dlp を使って YouTube の音声を MP3 で保存する CLI / Web アプリ"
+requires-python = ">=3.9"
+dependencies = ["yt-dlp", "flask>=2.2"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+ytmp3 = "ytmp3.cli:main"
+ytmp3-web = "ytmp3.web:main"
+
+[tool.setuptools]
+packages = ["ytmp3"]
+
+[tool.setuptools.package-data]
+ytmp3 = ["templates/*.html"]

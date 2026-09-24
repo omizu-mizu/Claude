@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ytmp3</title>
+<style>
+  :root { --bg:#f7f7f8; --fg:#1d1d1f; --muted:#6b6b70; --card:#fff; --line:#dcdce0; --accent:#2563eb; --err:#c62828; --ok:#2e7d32; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --fg:#ececf0; --muted:#9a9aa2; --card:#1e1e22; --line:#33333a; --accent:#60a5fa; --err:#ef7676; --ok:#7bc47f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 system-ui, "Segoe UI", "Yu Gothic UI", sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .muted { color:var(--muted); font-size:13px; }
+  form, .job { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
+  .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  .check { display:flex; align-items:center; gap:6px; margin-top:12px; color:var(--fg); font-size:14px; }
+  .check input { width:auto; }
+  button { margin-top:16px; width:100%; padding:10px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin:8px 0; }
+  .bar > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+  .err { color:var(--err); white-space:pre-wrap; word-break:break-word; }
+  .ok { color:var(--ok); }
+  .title { font-weight:600; word-break:break-word; }
+  a { color:var(--accent); }
+  #formError { margin-top:10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ytmp3</h1>
+  <div class="muted">保存先: {{ output_dir }}</div>
+
+  <form id="form">
+    <label for="url">URL</label>
+    <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+    <div class="row">
+      <div>
+        <label for="start">開始（任意）</label>
+        <input id="start" placeholder="1:23">
+      </div>
+      <div>
+        <label for="end">終了（任意）</label>
+        <input id="end" placeholder="2:45">
+      </div>
+      <div>
+        <label for="bitrate">音質 (kbps)</label>
+        <select id="bitrate">
+          {% for b in bitrates %}<option value="{{ b }}" {% if b == "192" %}selected{% endif %}>{{ b }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <label class="check"><input id="playlist" type="checkbox"> プレイリスト全体を処理する</label>
+    <button id="submit" type="submit">MP3 に変換</button>
+    <div id="formError" class="err"></div>
+  </form>
+
+  <div id="jobs"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const labels = { queued: "待機中", downloading: "ダウンロード中", converting: "変換中", done: "完了", error: "失敗" };
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("formError").textContent = "";
+  $("submit").disabled = true;
+  try {
+    const res = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: $("url").value, start: $("start").value, end: $("end").value,
+        bitrate: $("bitrate").value, playlist: $("playlist").checked,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("formError").textContent = data.error || "エラーが発生しました。"; return; }
+    addJob(data.id, $("url").value);
+    $("url").value = "";
+  } catch (err) {
+    $("formError").textContent = "サーバに接続できません。";
+  } finally {
+    $("submit").disabled = false;
+  }
+});
+
+function addJob(id, url) {
+  const el = document.createElement("div");
+  el.className = "job";
+  el.innerHTML = '<div class="title"></div><div class="muted status"></div><div class="bar"><div></div></div><div class="result"></div>';
+  el.querySelector(".title").textContent = url;
+  $("jobs").prepend(el);
+  poll(id, el);
+}
+
+async function poll(id, el) {
+  let job;
+  try {
+    job = await (await fetch(`/api/jobs/${id}`)).json();
+  } catch { setTimeout(() => poll(id, el), 2000); return; }
+
+  if (job.title) el.querySelector(".title").textContent = job.title;
+  let status = labels[job.status] || job.status;
+  if (job.status === "downloading" && job.percent != null) status += ` ${job.percent}%`;
+  el.querySelector(".status").textContent = status;
+  el.querySelector(".bar > div").style.width = (job.status === "done" ? 100 : job.percent || 0) + "%";
+
+  const result = el.querySelector(".result");
+  if (job.status === "done") {
+    el.querySelector(".bar").remove();
+    result.className = "result ok";
+    if (!job.files.length) result.textContent = "保存しました（ファイル名を取得できませんでした）";
+    job.files.forEach((name, i) => {
+      const a = document.createElement("a");
+      a.href = `/api/jobs/${id}/files/${i}`;
+      a.textContent = name;
+      const div = document.createElement("div");
+      div.append(a);
+      result.append(div);
+    });
+  } else if (job.status === "error") {
+    el.querySelector(".bar").remove();
+    result.className = "result err";
+    result.textContent = job.error;
+  } else {
+    setTimeout(() => poll(id, el), 1000);
+  }
+}
+</script>
+</body>
+</html>
