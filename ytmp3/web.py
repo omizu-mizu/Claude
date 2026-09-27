@@ -10,7 +10,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
 
-from .core import BITRATES, YtMp3Error, check_ffmpeg, download_mp3, parse_time
+from .core import BITRATES, RESOLUTIONS, YtMp3Error, check_ffmpeg, download_mp3, parse_time
 
 DEFAULT_OUTPUT = Path.home() / "Music" / "ytmp3"
 
@@ -24,7 +24,10 @@ def create_app(output_dir: Path = DEFAULT_OUTPUT) -> Flask:
         with lock:
             jobs[job_id].update(fields)
 
-    def run_job(job_id: str, url: str, bitrate: str, start, end, playlist: bool) -> None:
+    def run_job(
+        job_id: str, url: str, bitrate: str, start, end, playlist: bool,
+        video: bool, resolution: str,
+    ) -> None:
         def hook(d: dict) -> None:
             if d.get("status") == "downloading":
                 total = d.get("total_bytes") or d.get("total_bytes_estimate")
@@ -36,7 +39,10 @@ def create_app(output_dir: Path = DEFAULT_OUTPUT) -> Flask:
                 update(job_id, status="converting", percent=100)
 
         try:
-            files = download_mp3(url, output_dir, bitrate, start, end, playlist, hook, quiet=True)
+            files = download_mp3(
+                url, output_dir, bitrate, start, end, playlist, hook,
+                quiet=True, video=video, resolution=resolution,
+            )
         except YtMp3Error as exc:
             update(job_id, status="error", error=str(exc))
             return
@@ -47,7 +53,9 @@ def create_app(output_dir: Path = DEFAULT_OUTPUT) -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html", bitrates=BITRATES, output_dir=str(output_dir))
+        return render_template(
+            "index.html", bitrates=BITRATES, resolutions=RESOLUTIONS, output_dir=str(output_dir)
+        )
 
     @app.post("/api/jobs")
     def create_job():
@@ -56,9 +64,13 @@ def create_app(output_dir: Path = DEFAULT_OUTPUT) -> Flask:
         if not url:
             return jsonify(error="URL を入力してください。"), 400
         bitrate = str(data.get("bitrate") or "192")
+        video = bool(data.get("video"))
+        resolution = str(data.get("resolution") or "best")
         try:
             if bitrate not in BITRATES:
                 raise YtMp3Error("ビットレートが不正です。")
+            if resolution not in RESOLUTIONS:
+                raise YtMp3Error("画質が不正です。")
             start = parse_time(data.get("start"))
             end = parse_time(data.get("end"))
             if start is not None and end is not None and end <= start:
@@ -75,7 +87,7 @@ def create_app(output_dir: Path = DEFAULT_OUTPUT) -> Flask:
             }
         threading.Thread(
             target=run_job,
-            args=(job_id, url, bitrate, start, end, bool(data.get("playlist"))),
+            args=(job_id, url, bitrate, start, end, bool(data.get("playlist")), video, resolution),
             daemon=True,
         ).start()
         return jsonify(id=job_id), 202

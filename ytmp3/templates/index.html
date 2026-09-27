@@ -20,6 +20,8 @@
   .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
   .check { display:flex; align-items:center; gap:6px; margin-top:12px; color:var(--fg); font-size:14px; }
   .check input { width:auto; }
+  .modes { display:flex; gap:18px; margin-top:12px; }
+  .modes .check { margin-top:0; }
   button { margin-top:16px; width:100%; padding:10px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.6; cursor:default; }
   .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin:8px 0; }
@@ -39,6 +41,10 @@
   <form id="form">
     <label for="url">URL</label>
     <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+    <div class="modes">
+      <label class="check"><input type="radio" name="mode" value="mp3" checked> MP3（音声）</label>
+      <label class="check"><input type="radio" name="mode" value="mp4"> MP4（動画）</label>
+    </div>
     <div class="row">
       <div>
         <label for="start">開始（任意）</label>
@@ -48,10 +54,16 @@
         <label for="end">終了（任意）</label>
         <input id="end" placeholder="2:45">
       </div>
-      <div>
+      <div id="bitrateBox">
         <label for="bitrate">音質 (kbps)</label>
         <select id="bitrate">
           {% for b in bitrates %}<option value="{{ b }}" {% if b == "192" %}selected{% endif %}>{{ b }}</option>{% endfor %}
+        </select>
+      </div>
+      <div id="resolutionBox" hidden>
+        <label for="resolution">画質</label>
+        <select id="resolution">
+          {% for r in resolutions %}<option value="{{ r }}">{{ "最高" if r == "best" else r ~ "p" }}</option>{% endfor %}
         </select>
       </div>
     </div>
@@ -65,6 +77,15 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const isVideo = () => document.querySelector('input[name="mode"]:checked').value === "mp4";
+
+function updateMode() {
+  $("bitrateBox").hidden = isVideo();
+  $("resolutionBox").hidden = !isVideo();
+  $("submit").textContent = isVideo() ? "MP4 で保存" : "MP3 に変換";
+}
+document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", updateMode));
+updateMode();
 const labels = { queued: "待機中", downloading: "ダウンロード中", converting: "変換中", done: "完了", error: "失敗" };
 
 $("form").addEventListener("submit", async (e) => {
@@ -78,6 +99,7 @@ $("form").addEventListener("submit", async (e) => {
       body: JSON.stringify({
         url: $("url").value, start: $("start").value, end: $("end").value,
         bitrate: $("bitrate").value, playlist: $("playlist").checked,
+        video: isVideo(), resolution: $("resolution").value,
       }),
     });
     const data = await res.json();

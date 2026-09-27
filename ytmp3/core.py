@@ -1,4 +1,4 @@
-"""ダウンロードと MP3 変換の本体。CLI と Web UI の両方から使う。"""
+"""ダウンロードと MP3 / MP4 変換の本体。CLI と Web UI の両方から使う。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import yt_dlp
 from yt_dlp.utils import download_range_func
 
 BITRATES = ("128", "192", "256", "320")
+RESOLUTIONS = ("best", "1080", "720", "480", "360")
 
 
 class YtMp3Error(Exception):
@@ -61,15 +62,18 @@ def build_options(
     playlist: bool = False,
     progress_hook: Optional[Callable[[dict], None]] = None,
     quiet: bool = False,
+    video: bool = False,
+    resolution: str = "best",
 ) -> dict:
     if bitrate not in BITRATES:
         raise YtMp3Error(f"ビットレートは {', '.join(BITRATES)} から選んでください。")
+    if resolution not in RESOLUTIONS:
+        raise YtMp3Error(f"画質は {', '.join(RESOLUTIONS)} から選んでください。")
     if start is not None and end is not None and end <= start:
         raise YtMp3Error("終了時刻は開始時刻より後にしてください。")
 
     template = "%(title)s"
     opts: dict = {
-        "format": "bestaudio/best",
         "noplaylist": not playlist,
         "windowsfilenames": True,
         "quiet": quiet,
@@ -77,15 +81,30 @@ def build_options(
         "noprogress": quiet,
         "writethumbnail": True,
         "postprocessors": [
+            {"key": "FFmpegMetadata", "add_metadata": True},
+            {"key": "EmbedThumbnail"},
+        ],
+    }
+
+    if video:
+        # どの PC・ソフトでも再生できるよう、画質より H.264 + AAC を優先する
+        opts["format"] = "bv*+ba/b"
+        opts["format_sort"] = [
+            "vcodec:h264",
+            "res" if resolution == "best" else f"res:{resolution}",
+            "acodec:m4a",
+        ]
+        opts["merge_output_format"] = "mp4"
+    else:
+        opts["format"] = "bestaudio/best"
+        opts["postprocessors"].insert(
+            0,
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": bitrate,
             },
-            {"key": "FFmpegMetadata", "add_metadata": True},
-            {"key": "EmbedThumbnail"},
-        ],
-    }
+        )
 
     if start is not None or end is not None:
         s = start or 0.0
@@ -110,8 +129,10 @@ def download_mp3(
     playlist: bool = False,
     progress_hook: Optional[Callable[[dict], None]] = None,
     quiet: bool = False,
+    video: bool = False,
+    resolution: str = "best",
 ) -> list[Path]:
-    """URL の音声を MP3 で保存し、作成したファイルのパスを返す。"""
+    """URL の音声を MP3（video=True なら動画を MP4）で保存し、作成したファイルのパスを返す。"""
     check_ffmpeg()
     out = Path(out_dir).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -124,7 +145,9 @@ def download_mp3(
             if path:
                 created.append(Path(path))
 
-    opts = build_options(out, bitrate, start, end, playlist, progress_hook, quiet)
+    opts = build_options(
+        out, bitrate, start, end, playlist, progress_hook, quiet, video, resolution
+    )
     opts["postprocessor_hooks"] = [_pp_hook]
 
     try:
@@ -134,4 +157,5 @@ def download_mp3(
         raise YtMp3Error(str(exc)) from exc
 
     # 同じファイルが複数回報告されることがあるので重複を除く
-    return list(dict.fromkeys(p.with_suffix(".mp3") for p in created))
+    ext = ".mp4" if video else ".mp3"
+    return list(dict.fromkeys(p.with_suffix(ext) for p in created))

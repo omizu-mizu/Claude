@@ -54,3 +54,29 @@ def test_build_options_invalid(tmp_path):
         build_options(tmp_path, start=10, end=5)
     with pytest.raises(YtMp3Error):
         build_options(tmp_path, bitrate="999")
+
+
+def test_build_options_audio_default(tmp_path):
+    opts = build_options(tmp_path)
+    assert opts["format"] == "bestaudio/best"
+    keys = [pp["key"] for pp in opts["postprocessors"]]
+    assert keys == ["FFmpegExtractAudio", "FFmpegMetadata", "EmbedThumbnail"]
+    assert "merge_output_format" not in opts
+
+
+def test_build_options_video(tmp_path):
+    opts = build_options(tmp_path, video=True, resolution="720")
+    assert opts["merge_output_format"] == "mp4"
+    assert opts["format_sort"] == ["vcodec:h264", "res:720", "acodec:m4a"]
+    keys = [pp["key"] for pp in opts["postprocessors"]]
+    assert "FFmpegExtractAudio" not in keys
+
+
+def test_build_options_video_best(tmp_path):
+    opts = build_options(tmp_path, video=True)
+    assert opts["format_sort"][1] == "res"
+
+
+def test_build_options_invalid_resolution(tmp_path):
+    with pytest.raises(YtMp3Error):
+        build_options(tmp_path, video=True, resolution="4k")
